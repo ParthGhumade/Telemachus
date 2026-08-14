@@ -1,3 +1,10 @@
+# For installations
+
+pip install langchain langchain-community langchain-text-splitters langchain-openai langchain-huggingface langchain-chroma pypdf python-dotenv sentence-transformers
+
+
+###new cell
+
 import os
 from langchain_community.document_loaders import TextLoader, DirectoryLoader, PyPDFDirectoryLoader
 from langchain_text_splitters import CharacterTextSplitter
