@@ -1,14 +1,17 @@
 import os
-from langchain_community.document_loaders import TextLoader, DirectoryLoader, PyPDFDirectoryLoader
 from langchain_text_splitters import CharacterTextSplitter
 # from langchain_openai import OpenAIEmbeddings
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_chroma import Chroma
 from dotenv import load_dotenv
+from config import EMBEDDING_MODEL, CHROMA_PERSIST_DIR, GEMINI_API_KEY, DOCS_DIR
 
 load_dotenv()
 
-def load_documents(docs_path = "/content/docs"):
+def load_documents(docs_path=None):
+    if docs_path is None:
+        docs_path = str(DOCS_DIR)
+    from langchain_community.document_loaders import PyPDFDirectoryLoader
     print(f"Loading documents from '{docs_path}'....")
 
     if not os.path.exists(docs_path):
@@ -48,12 +51,13 @@ def split_documents(documents,chunk_size = 400, chunk_overlap = 0):
 
     return chunks
 
-def create_vector_store(chunks, persist_directory = "db/chroma_db"):
+def create_vector_store(chunks, persist_directory = CHROMA_PERSIST_DIR, model_name = EMBEDDING_MODEL):
     print("Creating Embeddings and storing it in ChromaDB.")
 
     # embedding_model = OpenAIEmbeddings(model = "text-embedding-3-small")
-    embedding_model = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
+    embedding_model = GoogleGenerativeAIEmbeddings(
+        model=model_name,
+        google_api_key=GEMINI_API_KEY
     )
 
     print("Creating vector store")
@@ -71,7 +75,7 @@ def main():
     print("=" * 50)
 
     # 1. Check documents
-    documents = load_documents(docs_path="docs")
+    documents = load_documents()
     print(f"\n📄 DOCUMENTS COUNT: {len(documents)}")
     if documents:
         print(f"   First doc length: {len(documents[0].page_content)} chars")
@@ -95,66 +99,70 @@ def main():
 
 
 
-if __name__ == "__main__":
-    main()
+# Ingestion execution can be called manually or in a separate script
+# if __name__ == "__main__":
+#     main()
+### Docs Agent Implementation ###
 
-### new cell
-
-from langchain_huggingface import HuggingFaceEmbeddings
-# from langchain_openai import ChatOpenAI
-# from langchain_core.messages import SystemMessage, HumanMessage
-from transformers import pipeline
-
-persistent_directory = "db/chroma_db"
-
-embedding_model = HuggingFaceEmbeddings(model_name = "sentence-transformers/all-MiniLM-L6-v2")
-
+import json
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_chroma import Chroma
-db = Chroma(persist_directory=persistent_directory, embedding_function=embedding_model, collection_metadata={"hnsw:space":"cosine"})
 
-query = "What are the main objectives of energy conservation? "
+class DocsAgent:
+    """
+    Docs Agent responsible for retrieving unstructured evidence
+    as defined in the architecture. It does NOT generate responses.
+    """
+    def __init__(self, persist_directory=CHROMA_PERSIST_DIR, model_name=EMBEDDING_MODEL):
+        self.embedding_model = GoogleGenerativeAIEmbeddings(
+            model=model_name,
+            google_api_key=GEMINI_API_KEY
+        )
+        self.db = Chroma(
+            persist_directory=persist_directory, 
+            embedding_function=self.embedding_model, 
+            collection_metadata={"hnsw:space":"cosine"}
+        )
 
-retriever = db.as_retriever(
-    search_type = "similarity_score_threshold",
-    search_kwargs = {"k":2,"score_threshold":0.3}
-)
+    def retrieve(self, query: str, k: int = 5, threshold: float = 0.3) -> dict:
+        """
+        Retrieves relevant document chunks and returns them in the 
+        structured JSON format expected by the architecture.
+        """
+        try:
+            # similarity_search_with_score returns (Document, distance)
+            results = self.db.similarity_search_with_score(query, k=k)
+        except Exception as e:
+            print(f"Error querying ChromaDB: {e}")
+            return {"sources": []}
+            
+        sources = []
+        for doc, distance in results:
+            # Chroma uses cosine distance, so similarity is roughly 1.0 - distance
+            relevance = 1.0 - distance
+            
+            if relevance < threshold:
+                continue
+                
+            metadata = doc.metadata
+            sources.append({
+                "text": doc.page_content,
+                "source": metadata.get("source", "unknown"),
+                "page": metadata.get("page", 0),
+                "relevance": round(relevance, 4)
+            })
+            
+        return {"sources": sources}
 
-relevant_docs = retriever.invoke(query)
-print(f"User query: {query}")
-print("context")
-for i,doc in enumerate(relevant_docs,1):
-    print(f"Document{i} : \n {doc.page_content}\n")
-
-
-#CHATGPT
-combined_input = f"""Based on the following documents please answer this question: {query}
-Documents:
-{chr(10).join([f"-{doc.page_content[:800]}"for doc in relevant_docs])}
-Please provide a clear helpful answer using only the information from these documents. If you can't find the answer in the document then just say "I don't have enough information to answer your query"
-"""
-
-# model = ChatOpenAI(model="gpt-4o")
-# messages = [
-#     SystemMessage(content = "You are a good assistant man"),
-#     HumanMessage(content=combined_input),
-# ]
-# result = model.invoke(messages)
-
-# print("\n Generated Response: ")
-# print(result.content)
-
-### new cell
-
-#LOCAL MODEL
-
-print("\n Generating Response: ")
-model = pipeline("text-generation",model = "distilgpt2")
-
-result = model(
-    combined_input,
-    max_new_tokens = 150,
-    do_sample = False
-)
-print("\nGenerated Output: ")
-print(result[0]["generated_text"])
+# Example Usage (Testing the Docs Agent)
+if __name__ == "__main__":
+    # If run directly, demonstrate the Docs Agent functionality
+    agent = DocsAgent()
+    query = "What are the main objectives of energy conservation?"
+    print(f"Testing Docs Agent with query: '{query}'\n")
+    
+    evidence = agent.retrieve(query)
+    
+    # Output the structured evidence as JSON
+    print(json.dumps(evidence, indent=2))
 
