@@ -90,12 +90,23 @@ class Orchestrator:
         return final_answer
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 app = FastAPI(title="Energy Intelligence API")
 
+# Add CORS Middleware so frontend can communicate smoothly
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # Initialize orchestrator once on startup
 orchestrator_instance = Orchestrator()
+
 
 class QueryRequest(BaseModel):
     query: str

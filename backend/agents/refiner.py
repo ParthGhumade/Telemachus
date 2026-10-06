@@ -102,19 +102,51 @@ User Query:
 
 class RefinerAgent:
     def __init__(self, model: str = LLM_MODEL):
-        self.client = get_llm()
+        try:
+            self.client = get_llm()
+        except Exception as e:
+            self.client = None
+            print(f"[RefinerAgent] Note: LLM client not configured ({e}). Running in resilient fallback mode.")
         self.model = model
         
-    def refine(self, query: str) -> RefinerOutput:
-        prompt = REFINER_PROMPT.format(query=query)
+    def _heuristic_refine(self, query: str) -> RefinerOutput:
+        q_lower = query.lower()
+        data_keywords = ["household", "mac0", "highest", "lowest", "kwh", "tariff", "2012", "2013", "2014", "average", "median", "sum", "consumption in"]
+        doc_keywords = ["report", "what", "why", "how", "efficiency", "conservation", "peak", "recommend", "explain", "guide", "whitepaper"]
         
-        chat = self.client.chats.create(
-            model=self.model,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=RefinerOutput,
-                temperature=0.1,
-            ),
+        requires_data = any(k in q_lower for k in data_keywords)
+        requires_docs = any(k in q_lower for k in doc_keywords) or not requires_data
+        
+        return RefinerOutput(
+            status="READY",
+            original_query=query,
+            refined_query=query,
+            intent="general_energy_inquiry",
+            assumptions=["Using direct semantic matching"],
+            requires_data=requires_data,
+            requires_docs=requires_docs,
+            data_plan=DataPlan() if requires_data else None,
+            doc_plan=DocPlan(search_queries=[query]) if requires_docs else None
         )
-        response = chat.send_message(prompt)
-        return RefinerOutput.model_validate_json(clean_json_response(response.text))
+
+    def refine(self, query: str) -> RefinerOutput:
+        if not self.client:
+            return self._heuristic_refine(query)
+
+        try:
+            prompt = REFINER_PROMPT.format(query=query)
+            chat = self.client.chats.create(
+                model=self.model,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=RefinerOutput,
+                    temperature=0.1,
+                ),
+            )
+            response = chat.send_message(prompt)
+            return RefinerOutput.model_validate_json(clean_json_response(response.text))
+        except Exception as e:
+            print(f"[RefinerAgent] Warning during LLM refinement ({e}). Using direct intent routing.")
+            return self._heuristic_refine(query)
+
+

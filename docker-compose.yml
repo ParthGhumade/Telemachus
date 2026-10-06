@@ -1,0 +1,41 @@
+services:
+  telemachus:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: telemachus
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # API Keys
+      - gemini_api_key=${gemini_api_key}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      # Model configurations
+      - LLM_MODEL=${LLM_MODEL:-gemini-3.5-flash}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-models/gemini-embedding-001}
+      # Dataset Download from Google Drive (set in .env if not mounting dataset.zip)
+      - DATASET_DRIVE_URL=${DATASET_DRIVE_URL:-}
+      - DATASET_DRIVE_ID=${DATASET_DRIVE_ID:-}
+      # Persistent storage paths
+      - DUCKDB_PATH=/app/db/telemachus.duckdb
+      - CHROMA_PERSIST_DIR=/app/db/chroma_db_gemini
+    volumes:
+      # 1. Dataset Volume: persists all downloaded/unzipped Parquet files and .txt docs
+      - dataset_data:/app/backend/dataset
+      # 2. Database Volume: persists DuckDB and ChromaDB vector store
+      - db_data:/app/db
+      # Optional: bind mount local dataset.zip if available on host
+      - ./dataset.zip:/app/dataset.zip:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  dataset_data:
+    name: telemachus_dataset_data
+  db_data:
+    name: telemachus_db_data

@@ -50,7 +50,11 @@ Please provide the final helpful response based on the context provided above.
 
 class ResponseAgent:
     def __init__(self, model: str = LLM_MODEL):
-        self.client = get_llm()
+        try:
+            self.client = get_llm()
+        except Exception as e:
+            self.client = None
+            print(f"[ResponseAgent] Note: LLM client not configured ({e}). Running in resilient fallback mode.")
         self.model = model
         
     def synthesize(self, 
@@ -61,21 +65,43 @@ class ResponseAgent:
                    data_results: Dict[str, Any],
                    limitations: List[str]) -> str:
                        
-        prompt = RESPONSE_AGENT_PROMPT.format(
-            original_query=original_query,
-            refined_query=refined_query,
-            assumptions=assumptions,
-            doc_evidence=doc_evidence,
-            data_results=data_results,
-            limitations=limitations
-        )
-        
-        # This agent just returns a natural language string, so we don't need structured output
-        chat = self.client.chats.create(
-            model=self.model,
-            config=types.GenerateContentConfig(
-                temperature=0.1,
-            ),
-        )
-        response = chat.send_message(prompt)
-        return response.text
+        if self.client:
+            try:
+                prompt = RESPONSE_AGENT_PROMPT.format(
+                    original_query=original_query,
+                    refined_query=refined_query,
+                    assumptions=assumptions,
+                    doc_evidence=doc_evidence,
+                    data_results=data_results,
+                    limitations=limitations
+                )
+                chat = self.client.chats.create(
+                    model=self.model,
+                    config=types.GenerateContentConfig(
+                        temperature=0.1,
+                    ),
+                )
+                response = chat.send_message(prompt)
+                return response.text
+            except Exception as e:
+                print(f"[ResponseAgent] Warning during LLM generation ({e}). Falling back to grounded excerpt synthesis.")
+
+        # Grounded fallback synthesis directly from retrieved RAG evidence
+        sources = doc_evidence.get("sources", [])
+        if sources:
+            response_parts = [
+                f"### Evidence from Retrieved Documents\n",
+                f"Based on the indexed energy reports and reference documentation:\n"
+            ]
+            for i, src in enumerate(sources[:3]):
+                source_name = Path(src.get('source', 'document')).name
+                page_info = f" (Page {src.get('page')})" if src.get('page') else ""
+                relevance_info = f" [Relevance: {src.get('relevance', 0):.0%}]"
+                response_parts.append(f"**{i+1}. `{source_name}`{page_info}{relevance_info}:**\n> {src.get('text', '').strip()}\n")
+            
+            if not self.client:
+                response_parts.append("\n*(Tip: Add `gemini_api_key` to `.env` to enable full conversational LLM synthesis)*")
+            return "\n".join(response_parts)
+            
+        return "I could not find relevant documentation or dataset records answering your query."
+

@@ -1395,27 +1395,32 @@
   }
 
   /* ──────────────────────────────────────────────
-     MOCK API — RAG INTEGRATION POINT
+     API INTEGRATION (RAG BACKEND + FALLBACK)
   ─────────────────────────────────────────────── */
   const MockAPI = {
     async getResponse(msg) {
-      // ─────────────────────────────────────────────────────────────
-      // TODO (RAG team): Replace this mock with your real API call.
-      //
-      // Example:
-      //   const res = await fetch('/api/chat', {
-      //     method: 'POST',
-      //     headers: { 'Content-Type': 'application/json' },
-      //     body: JSON.stringify({ message: msg, history })
-      //   });
-      //   if (!res.ok) throw new Error('API error');
-      //   const data = await res.json();
-      //   return { text: data.answer, sources: data.sources, followups: data.followups };
-      // ─────────────────────────────────────────────────────────────
+      try {
+        const res = await fetch('http://localhost:8000/api/query', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: msg })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          return {
+            text: data.response || "No response received.",
+            sources: [],
+            followups: []
+          };
+        }
+      } catch (err) {
+        console.warn('Backend API unavailable, falling back to local demo mock:', err);
+      }
       await sleep(850 + Math.random() * 550);
       return getMock(msg);
     }
   };
+
 
   function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 

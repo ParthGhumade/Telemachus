@@ -82,27 +82,54 @@ Provide your response with the required queries. The actual execution will be pe
 
 class DataAgent:
     def __init__(self, model: str = LLM_MODEL):
-        self.client = get_llm()
+        try:
+            self.client = get_llm()
+        except Exception as e:
+            self.client = None
+            print(f"[DataAgent] Note: LLM client not configured ({e}). Running in resilient fallback mode.")
         self.model = model
+
         
     def execute_queries(self, queries: List[QueryResult]) -> List[Dict[str, Any]]:
-        conn = get_connection()
+        conn = get_connection(read_only=True)
         combined_results = []
         
         for q in queries:
             try:
-                # Execute SQL with DuckDB
+                # Execute SQL with DuckDB (bounded to 100 rows per query for safety)
                 result_df = conn.execute(q.sql).fetchdf()
+                if len(result_df) > 100:
+                    result_df = result_df.head(100)
                 # Convert DataFrame to list of dicts for JSON serialization
                 records = result_df.to_dict(orient='records')
+                # Clean up any non-serializable objects (Timestamp, NaN)
+                for r in records:
+                    for k, v in r.items():
+                        if hasattr(v, 'isoformat'):
+                            r[k] = v.isoformat()
+                        elif str(v) == 'nan':
+                            r[k] = None
                 combined_results.extend(records)
             except Exception as e:
                 print(f"SQL Execution Error on query '{q.purpose}': {e}")
                 
         conn.close()
         return combined_results
+
         
     def analyze(self, refined_query: str, data_plan: Any) -> DataAgentOutput:
+        if not self.client:
+            try:
+                self.client = get_llm()
+            except Exception as e:
+                return DataAgentOutput(
+                    status="NO_DATA",
+                    queries=[],
+                    results=[],
+                    summary={},
+                    limitations=[f"LLM client not configured for SQL generation: {e}"]
+                )
+
         prompt = DATA_AGENT_PROMPT.format(
             refined_query=refined_query, 
             data_plan=data_plan
@@ -113,6 +140,7 @@ class DataAgent:
                 model=self.model,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
+
                     response_schema=LLMQueryPlan,
                     temperature=0.1,
                 ),
