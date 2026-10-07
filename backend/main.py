@@ -40,6 +40,8 @@ def get_orchestrator():
     return _orchestrator
 
 
+from typing import List, Dict, Any, Optional
+
 class QueryRequest(BaseModel):
     query: str
 
@@ -47,6 +49,11 @@ class QueryRequest(BaseModel):
 class QueryResponse(BaseModel):
     query: str
     response: str
+    sources: List[Dict[str, Any]] = []
+    followups: List[str] = []
+    intent: Optional[str] = None
+    sql_queries: List[str] = []
+    data_rows: int = 0
     status: str = "success"
 
 
@@ -67,10 +74,21 @@ def query_energy_intelligence(request: QueryRequest):
     
     try:
         orc = get_orchestrator()
-        result_text = orc.process_query(request.query)
+        result = orc.process_query(request.query, return_details=True)
+        if isinstance(result, dict):
+            return QueryResponse(
+                query=request.query,
+                response=result.get("response", ""),
+                sources=result.get("sources", []),
+                followups=result.get("followups", []),
+                intent=result.get("intent"),
+                sql_queries=result.get("sql_queries", []),
+                data_rows=result.get("data_rows", 0),
+                status=result.get("status", "success")
+            )
         return QueryResponse(
             query=request.query,
-            response=result_text,
+            response=str(result),
             status="success"
         )
     except Exception as e:

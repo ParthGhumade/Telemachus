@@ -27,6 +27,8 @@ services:
       - db_data:/app/db
       # Optional: bind mount local dataset.zip if available on host
       - ./dataset.zip:/app/dataset.zip:ro
+      # Frontend code mount for live UI updates
+      - ./frontend:/app/frontend:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/api/health || exit 1"]
       interval: 30s

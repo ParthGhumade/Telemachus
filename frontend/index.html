@@ -553,7 +553,7 @@
     .src-arrow { transition:transform .2s; display:inline-block; font-size:.7rem; }
     .src-toggle.open .src-arrow { transform:rotate(90deg); }
     .src-list { max-height:0; overflow:hidden; transition:max-height .3s var(--ease); }
-    .src-list.open { max-height:220px; }
+    .src-list.open { max-height:400px; overflow-y:auto; }
     .src-row {
       display:flex; align-items:flex-start; gap:8px;
       padding:8px 12px; border-top:1px solid var(--border-light);
@@ -566,6 +566,19 @@
       background:var(--accent-light); flex-shrink:0;
       display:flex; align-items:center; justify-content:center;
       font-size:.68rem; font-weight:700; color:var(--primary);
+      margin-top:2px;
+    }
+    .src-content { flex:1; display:flex; flex-direction:column; gap:4px; min-width:0; }
+    .src-header { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+    .src-title { font-weight:600; color:var(--text); word-break:break-word; }
+    .src-badge {
+      font-size:.68rem; font-weight:600; padding:1px 6px; border-radius:4px;
+      background:rgba(45,138,78,.12); color:var(--primary); white-space:nowrap;
+    }
+    .src-snippet {
+      font-size:.73rem; color:var(--text-muted); line-height:1.45;
+      background:rgba(0,0,0,.03); padding:5px 8px; border-radius:4px;
+      border-left:2px solid var(--accent); margin-top:2px; word-break:break-word;
     }
 
     /* ═══════════════════════════════════════════════════════════════
@@ -1270,19 +1283,19 @@
         </svg>
       </div>
       <h1 class="wel-title">What would you like to explore?</h1>
-      <p class="wel-sub">Ask me anything about clean energy, renewables, sustainability, or energy efficiency.</p>
+      <p class="wel-sub">Ask anything about smart meter consumption, peak hours, tariffs, or energy efficiency.</p>
       <div class="sug-grid" role="list">
-        <button class="sug-card" onclick="useSug('What is renewable energy?')" role="listitem">
-          <span class="sug-ico">☀️</span>What is renewable energy?
+        <button class="sug-card" onclick="useSug('What are the peak hours for residential electricity consumption in the UK?')" role="listitem">
+          <span class="sug-ico">🕒</span>Peak electricity hours in the UK?
         </button>
-        <button class="sug-card" onclick="useSug('How can solar energy reduce carbon emissions?')" role="listitem">
-          <span class="sug-ico">🌿</span>How can solar energy reduce emissions?
+        <button class="sug-card" onclick="useSug('Which 5 households recorded the highest average daily consumption across the dataset?')" role="listitem">
+          <span class="sug-ico">📊</span>Top 5 consuming households?
         </button>
-        <button class="sug-card" onclick="useSug('Explain energy efficiency in simple terms')" role="listitem">
-          <span class="sug-ico">⚡</span>Explain energy efficiency simply
+        <button class="sug-card" onclick="useSug('What is the average daily energy consumption for households on Standard vs Time of Use tariffs?')" role="listitem">
+          <span class="sug-ico">⚡</span>Standard vs Time of Use tariffs?
         </button>
-        <button class="sug-card" onclick="useSug('What are the major sources of clean energy?')" role="listitem">
-          <span class="sug-ico">💧</span>Major sources of clean energy?
+        <button class="sug-card" onclick="useSug('What are the top recommended energy conservation measures to reduce domestic electricity usage?')" role="listitem">
+          <span class="sug-ico">🌿</span>Top energy conservation measures?
         </button>
       </div>
     </div>`;
@@ -1397,30 +1410,103 @@
   /* ──────────────────────────────────────────────
      API INTEGRATION (RAG BACKEND + FALLBACK)
   ─────────────────────────────────────────────── */
+  const API_BASE = (window.location.origin && window.location.origin.startsWith('http'))
+    ? window.location.origin
+    : 'http://localhost:8000';
+
+  let backendConnected = false;
+
+  async function checkBackendHealth() {
+    const statusEl = document.querySelector('.hdr-status');
+    try {
+      const res = await fetch(`${API_BASE}/api/health`, { method: 'GET' });
+      if (res.ok) {
+        backendConnected = true;
+        if (statusEl) {
+          statusEl.innerHTML = `<span class="status-dot" style="background:#2D8A4E;box-shadow:0 0 6px #74C69D" aria-hidden="true"></span> Telemachus Multi-Agent API · Connected`;
+        }
+        return true;
+      }
+    } catch(err) {
+      // Backend not yet reachable
+    }
+    backendConnected = false;
+    if (statusEl) {
+      statusEl.innerHTML = `<span class="status-dot" style="background:#E67E22;animation:none" aria-hidden="true"></span> Offline Mode · Demo Fallback`;
+    }
+    return false;
+  }
+
+  // Ping backend on boot and every 25 seconds
+  setTimeout(checkBackendHealth, 400);
+  setInterval(checkBackendHealth, 25000);
+
+  function extractSourcesFromText(txt) {
+    if (!txt) return [];
+    const pattern = /\*\*(\d+)\.\s*`([^`]+)`(?:\s*\(([^)]+)\))?(?:\s*\[Relevance:\s*(\d+)%\])?:\*\*\s*([\s\S]*?)(?=(?:\n\*\*\d+\.|$))/g;
+    const sources = [];
+    let m;
+    while ((m = pattern.exec(txt)) !== null) {
+      const title = m[2] + (m[3] ? ` (${m[3]})` : '');
+      const relevance = m[4] ? parseInt(m[4], 10) / 100 : undefined;
+      const snippet = (m[5] || '').replace(/^>\s*/gm, '').trim();
+      sources.push({ title, relevance, text: snippet });
+    }
+    return sources;
+  }
+
+  function generateDefaultFollowups(msg) {
+    const q = (msg || '').toLowerCase();
+    if (q.includes('peak') || q.includes('hour')) {
+      return [
+        "Which 5 households had the highest daily consumption?",
+        "What is the average consumption for Standard vs Time of Use tariffs?",
+        "How does weather correlate with peak energy usage?"
+      ];
+    } else if (q.includes('household') || q.includes('highest') || q.includes('tariff')) {
+      return [
+        "What was the average energy consumption on the coldest day in London?",
+        "How does consumption vary across ACORN socio-economic groups?",
+        "What are the top recommended energy conservation measures?"
+      ];
+    } else if (q.includes('conservation') || q.includes('measure') || q.includes('efficiency')) {
+      return [
+        "What are the peak hours for residential electricity consumption in the UK?",
+        "How does the energy whitepaper technically define outliers?",
+        "What was the average consumption on the coldest day recorded?"
+      ];
+    }
+    return [
+      "What are the peak hours for residential electricity consumption in the UK?",
+      "Which 5 households recorded the highest daily consumption?",
+      "What is the average consumption for Standard vs Time of Use tariffs?"
+    ];
+  }
+
   const MockAPI = {
     async getResponse(msg) {
       try {
-        const res = await fetch('http://localhost:8000/api/query', {
+        const res = await fetch(`${API_BASE}/api/query`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ query: msg })
         });
         if (res.ok) {
           const data = await res.json();
-          return {
-            text: data.response || "No response received.",
-            sources: [],
-            followups: []
-          };
+          checkBackendHealth();
+          const text = data.response || "No response received.";
+          const sources = (data.sources && data.sources.length) ? data.sources : extractSourcesFromText(text);
+          const followups = (data.followups && data.followups.length) ? data.followups : generateDefaultFollowups(msg);
+          return { text, sources, followups };
         }
       } catch (err) {
         console.warn('Backend API unavailable, falling back to local demo mock:', err);
+        checkBackendHealth();
       }
       await sleep(850 + Math.random() * 550);
       return getMock(msg);
     }
   };
-
 
   function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -1747,12 +1833,28 @@
   function renderSources(src) {
     if (!src?.length) return '';
     const uid = 'sl-' + Date.now();
-    const rows = src.map((s,i) =>
-      `<div class="src-row" role="listitem">
+    const rows = src.map((s,i) => {
+      const title = s?.title || (typeof s === 'string' ? s : 'Source Document');
+      const relVal = s?.relevance;
+      const relevanceBadge = (relVal !== undefined && relVal !== null && !isNaN(relVal))
+        ? `<span class="src-badge">${Math.round(relVal <= 1 ? relVal * 100 : relVal)}% relevance</span>`
+        : '';
+      const snippet = s?.text
+        ? `<div class="src-snippet">${xss(s.text.length > 280 ? s.text.slice(0, 280) + '…' : s.text)}</div>`
+        : '';
+
+      return `<div class="src-row" role="listitem">
          <span class="src-num">${i+1}</span>
-         <span>${xss(s.title)}</span>
-       </div>`
-    ).join('');
+         <div class="src-content">
+           <div class="src-header">
+             <span class="src-title">${xss(title)}</span>
+             ${relevanceBadge}
+           </div>
+           ${snippet}
+         </div>
+       </div>`;
+    }).join('');
+
     return `<div class="sources-wrap" aria-label="Retrieved sources">
       <button class="src-toggle" onclick="toggleSrc(this)" aria-expanded="false">
         <span class="src-arrow" aria-hidden="true">▸</span>
