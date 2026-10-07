@@ -1408,7 +1408,7 @@
   }
 
   /* ──────────────────────────────────────────────
-     API INTEGRATION (RAG BACKEND + FALLBACK)
+     API INTEGRATION (MULTI-AGENT API ONLY)
   ─────────────────────────────────────────────── */
   const API_BASE = (window.location.origin && window.location.origin.startsWith('http'))
     ? window.location.origin
@@ -1432,7 +1432,7 @@
     }
     backendConnected = false;
     if (statusEl) {
-      statusEl.innerHTML = `<span class="status-dot" style="background:#E67E22;animation:none" aria-hidden="true"></span> Offline Mode · Demo Fallback`;
+      statusEl.innerHTML = `<span class="status-dot" style="background:#E67E22;animation:none" aria-hidden="true"></span> Disconnected from Agent API`;
     }
     return false;
   }
@@ -1483,32 +1483,49 @@
     ];
   }
 
-  const MockAPI = {
-    async getResponse(msg) {
+  const AgentAPI = {
+    async query(msg) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 120000);
       try {
         const res = await fetch(`${API_BASE}/api/query`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: msg })
+          body: JSON.stringify({ query: msg }),
+          signal: controller.signal
         });
-        if (res.ok) {
-          const data = await res.json();
-          checkBackendHealth();
-          const text = data.response || "No response received.";
-          const sources = (data.sources && data.sources.length) ? data.sources : extractSourcesFromText(text);
-          const followups = (data.followups && data.followups.length) ? data.followups : generateDefaultFollowups(msg);
-          return { text, sources, followups };
+        clearTimeout(timeoutId);
+
+        if (!res.ok) {
+          let errDetail = `Server responded with HTTP ${res.status}`;
+          try {
+            const errData = await res.json();
+            if (errData.detail) errDetail = errData.detail;
+          } catch (_) {}
+          throw new Error(errDetail);
         }
-      } catch (err) {
-        console.warn('Backend API unavailable, falling back to local demo mock:', err);
+
+        const data = await res.json();
         checkBackendHealth();
+
+        if (data.status === 'error') {
+          throw new Error(data.response || 'Agent returned an error while processing.');
+        }
+
+        const text = data.response || "No response received from agent.";
+        const sources = (data.sources && data.sources.length) ? data.sources : extractSourcesFromText(text);
+        const followups = (data.followups && data.followups.length) ? data.followups : generateDefaultFollowups(msg);
+        return { text, sources, followups };
+      } catch (err) {
+        clearTimeout(timeoutId);
+        checkBackendHealth();
+        if (err.name === 'AbortError') {
+          throw new Error('Agent query timed out after 120 seconds. Please try again.');
+        }
+        throw err;
       }
-      await sleep(850 + Math.random() * 550);
-      return getMock(msg);
     }
   };
-
-  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
   /* ──────────────────────────────────────────────
      GENERATION LIFECYCLE
@@ -1520,19 +1537,19 @@
     const tid = 'think-' + Date.now();
     showThinking(tid);
 
-    let data, failed = false;
+    let data = null, errMsg = null;
     try {
-      data = await MockAPI.getResponse(msg);
+      data = await AgentAPI.query(msg);
     } catch(e) {
-      failed = true;
-      console.error('Lumen error:', e);
+      errMsg = e.message || 'Failed to connect to agent service.';
+      console.error('Agent query error:', e);
     }
 
     removeThinking(tid);
     if (!generating) return;
 
-    if (failed) {
-      showErr(msg);
+    if (errMsg || !data) {
+      showErr(msg, errMsg);
       generating = false;
       setGenUI(false);
       return;
@@ -1663,14 +1680,16 @@
   /* ──────────────────────────────────────────────
      ERROR
   ─────────────────────────────────────────────── */
-  function showErr(msg) {
+  function showErr(msg, errDetail) {
     const el = document.createElement('div');
     el.className = 'err-card';
+    const detail = errDetail ? `<div style="font-size:.76rem;margin-top:4px;color:var(--text-muted);word-break:break-word">${xss(errDetail)}</div>` : '';
     el.innerHTML = `
       <div class="err-ico" aria-hidden="true">${icoSVG('warn')}</div>
-      <div>
-        <div class="err-txt">Something went wrong while generating your answer.</div>
-        <button class="err-retry" onclick="retryMsg(this,'${esc(msg)}')" aria-label="Try again">Try again</button>
+      <div style="flex:1">
+        <div class="err-txt" style="font-weight:600">Failed to get response from Agent API</div>
+        ${detail}
+        <button class="err-retry" onclick="retryMsg(this,'${esc(msg)}')" aria-label="Try again">Retry query</button>
       </div>`;
     msgs().appendChild(el);
     scrollBot();
@@ -1988,58 +2007,7 @@
     return svgs[name] || '';
   }
 
-  /* ──────────────────────────────────────────────
-     MOCK RESPONSES
-  ─────────────────────────────────────────────── */
-  function getMock(msg) {
-    const q = msg.toLowerCase();
 
-    if (q.includes('renewable') || q.match(/what is.*energy/)) return {
-      text: `## Renewable Energy\n\nRenewable energy is energy derived from **naturally replenishing sources** that are essentially inexhaustible on human timescales. Unlike fossil fuels, these resources regenerate naturally and produce little to no greenhouse gas emissions during operation.\n\n**The major types include:**\n\n- ☀️ **Solar energy** — harnessing sunlight via photovoltaic panels or thermal collectors\n- 💨 **Wind energy** — converting wind kinetic energy through turbines\n- 💧 **Hydropower** — using flowing water to generate electricity\n- 🌍 **Geothermal** — tapping heat from within the Earth\n- 🌱 **Biomass** — converting organic material into usable energy\n\n**Why it matters:**\n\nRenewable energy is central to addressing climate change. In 2023, renewables accounted for over **30% of global electricity generation**, a figure expected to exceed 50% by 2030 under current growth trajectories.\n\nThe transition to renewables is not just an environmental decision — it is increasingly an **economic one**, as solar and wind are now the cheapest sources of new electricity generation in most of the world.`,
-      sources: [
-        { title:'IEA Renewables Report 2024' },
-        { title:'IRENA Global Renewable Capacity Statistics' },
-        { title:'Our World in Data — Energy Mix' }
-      ],
-      followups:['What are the advantages of solar?','How does wind energy work?','Tell me about hydropower']
-    };
-
-    if (q.includes('solar') || q.includes('emission') || q.includes('carbon')) return {
-      text: `## Solar Energy & Carbon Emissions\n\nSolar energy is one of the most powerful tools available for reducing carbon emissions. Here's how it works:\n\n### Direct Displacement of Fossil Fuels\n\nEvery kilowatt-hour (kWh) of solar electricity displaces electricity that would otherwise come from burning fossil fuels. In coal-heavy grids, this can prevent approximately **0.7–0.9 kg of CO₂** per kWh generated.\n\n### Lifecycle Perspective\n\nWhile manufacturing solar panels does produce some emissions, the **carbon payback period** is typically just **1–3 years** — after which panels generate clean electricity for 25–30 years with virtually zero emissions.\n\n### The Numbers\n\n- Global solar capacity reached **1.6 TW** in 2023\n- Solar prevented an estimated **1.4 billion tonnes of CO₂** globally in 2022\n- Solar is now the **fastest-growing energy source** in human history\n\n### The Scale of the Opportunity\n\nThe sunlight striking Earth in **one hour** contains enough energy to power all human activity for an **entire year**. We are only just beginning to tap this resource.\n\nWith continued cost reductions and policy support, solar is expected to become the world's single largest source of electricity before 2035.`,
-      sources: [
-        { title:'IEA Solar PV Analysis 2024' },
-        { title:'NREL Life Cycle Assessment Harmonization' },
-        { title:'BloombergNEF New Energy Outlook' }
-      ],
-      followups:['How do solar panels work?','What is the cost of solar today?','Compare solar vs wind energy']
-    };
-
-    if (q.includes('effici')) return {
-      text: `## Energy Efficiency\n\nEnergy efficiency simply means **doing the same things using less energy** — without sacrificing comfort, performance, or productivity.\n\nThink of it as eliminating waste rather than reducing useful output.\n\n### Simple Everyday Examples\n\n- 💡 **LED lighting** uses ~75% less electricity than traditional incandescent bulbs\n- 🏠 **Insulation** can reduce home heating and cooling energy by up to 40%\n- 🚗 **Electric vehicles** convert ~85% of energy into motion, vs. ~25% for petrol engines\n- 🏭 **Industrial variable-speed drives** can cut motor energy use by 20–50%\n\n### Why Efficiency Is the "First Fuel"\n\nEnergy efficiency is often called the **"first fuel"** because the cheapest and cleanest unit of energy is the one you never have to produce in the first place.\n\n**Key benefits:**\n- Lower energy bills for households and businesses\n- Reduced carbon emissions across all sectors\n- Less strain on electricity infrastructure\n- Increased national energy security\n\n### The Scale of the Opportunity\n\nThe IEA estimates that efficiency improvements alone could deliver **40% of the emissions reductions** needed to meet global climate targets by 2040 — making it one of the single most impactful climate levers available today.`,
-      sources: [
-        { title:'IEA Energy Efficiency 2023 Report' },
-        { title:'U.S. DOE — Energy Efficiency Basics' }
-      ],
-      followups:['How can I improve home energy efficiency?','What are smart energy systems?','Explain net-zero buildings']
-    };
-
-    if (q.includes('clean energy') || q.includes('major sources') || q.includes('sources of')) return {
-      text: `## Major Sources of Clean Energy\n\nClean energy encompasses sources that produce little or no pollution or greenhouse gas emissions during operation.\n\n### The Primary Sources\n\n**1. Solar Energy**\nConverts sunlight into electricity using photovoltaic (PV) cells or concentrating solar power (CSP). The fastest-growing energy source globally, with costs dropping over 90% in the last decade.\n\n**2. Wind Energy**\nOnshore and offshore wind turbines capture kinetic energy from moving air. Offshore wind is particularly powerful and increasingly cost-competitive with conventional generation.\n\n**3. Hydropower**\nThe world's largest source of renewable electricity today. Uses flowing water through dams or run-of-river systems to generate reliable, controllable power.\n\n**4. Geothermal Energy**\nTaps the Earth's internal heat. Highly reliable (near 100% capacity factor) but geographically constrained to tectonically active regions.\n\n**5. Nuclear Energy**\nThough not renewable, nuclear produces very low lifecycle carbon emissions and provides stable baseload power. Increasingly being reconsidered as part of the clean energy portfolio.\n\n**6. Green Hydrogen**\nProduced using renewable electricity via electrolysis. Emerging as a critical solution for decarbonising heavy industry and long-haul transport.\n\n**7. Ocean Energy**\nTidal, wave, and ocean thermal technologies are still emerging, but hold enormous untapped potential.\n\n### Current Global Snapshot\n\nAs of 2023, renewables supply approximately **30% of global electricity**. Hydropower currently leads, but solar and wind are growing fastest and are projected to dominate by 2040.`,
-      sources: [
-        { title:'IEA World Energy Outlook 2024' },
-        { title:'IRENA Renewable Power Generation Costs 2023' },
-        { title:'Our World in Data — Electricity Mix' }
-      ],
-      followups:['Which energy source is most efficient?','Tell me about green hydrogen','What is offshore wind power?']
-    };
-
-    // Default
-    return {
-      text: `That's a great question! 🌱\n\nI'm **Lumen**, your intelligent energy companion. My knowledge covers a wide range of energy topics:\n\n- **Renewable energy sources** — solar, wind, hydro, geothermal, biomass\n- **Energy efficiency and conservation** — at home, in industry, in transport\n- **Climate and carbon emissions** — impacts, pathways, and solutions\n- **Energy policy and economics** — global trends, costs, and investment\n- **Emerging technologies** — hydrogen, grid-scale storage, smart grids\n- **Practical sustainability tips** — for individuals, households, and businesses\n\nCould you tell me a bit more about what you'd like to know? For example:\n\n- How a specific energy technology works?\n- The environmental impact of different energy choices?\n- Steps you can take to reduce your own energy footprint?\n- Global energy statistics and trends?\n\nI'm here to help you understand energy clearly and reliably.`,
-      sources: [],
-      followups:['What is renewable energy?','How does solar work?','Explain energy efficiency']
-    };
-  }
 
   /* ──────────────────────────────────────────────
      TOOLTIP LOGIC
