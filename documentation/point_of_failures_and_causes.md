@@ -393,8 +393,8 @@ Before deploying Telemachus or merging into production branches, verify each gat
 - [ ] **[Correctness]** Database execution errors bubble up as `status="ERROR"` rather than being masked as `NO_DATA`.
 - [ ] **[Correctness]** Multi-turn session IDs preserve clarification state across user interactions.
 - [ ] **[Architecture]** `PARQUET_DIR`, `DOCS_DIR`, and `DUCKDB_PATH` resolve cleanly to real repository directories out-of-the-box.
-- [ ] **[Architecture]** FastAPI includes `CORSMiddleware` allowing frontend origins.
-- [ ] **[Architecture]** `frontend/index.html` connects to `/api/query` instead of static mocks.
+- [x] **[Architecture]** FastAPI includes `CORSMiddleware` allowing frontend origins.
+- [x] **[Architecture]** `frontend/index.html` connects to `/api/query` instead of static mocks.
 - [ ] **[Performance]** Result sets fetched into memory are capped with strict row limits to prevent OOM.
 - [ ] **[Performance]** Downstream agents (Docs Agent and Data Agent) execute concurrently via `asyncio.gather()`.
 - [ ] **[Reliability]** LLM invocations are wrapped with exponential backoff retry logic for HTTP 429 quota resilience.
