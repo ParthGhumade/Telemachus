@@ -27,8 +27,10 @@ services:
       - db_data:/app/db
       # Optional: bind mount local dataset.zip if available on host
       - ./dataset.zip:/app/dataset.zip:ro
-      # Frontend code mount for live UI updates
+      # Code mounts for live updates without container rebuild
       - ./frontend:/app/frontend:ro
+      - ./backend/main.py:/app/backend/main.py:ro
+      - ./backend/orchestrator.py:/app/backend/orchestrator.py:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/api/health || exit 1"]
       interval: 30s

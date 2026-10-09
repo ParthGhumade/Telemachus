@@ -1419,7 +1419,10 @@
   async function checkBackendHealth() {
     const statusEl = document.querySelector('.hdr-status');
     try {
-      const res = await fetch(`${API_BASE}/api/health`, { method: 'GET' });
+      const res = await fetch(`${API_BASE}/api/health`, {
+        method: 'GET',
+        headers: { 'Bypass-Tunnel-Reminder': 'true' }
+      });
       if (res.ok) {
         backendConnected = true;
         if (statusEl) {
@@ -1490,7 +1493,10 @@
       try {
         const res = await fetch(`${API_BASE}/api/query`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'Bypass-Tunnel-Reminder': 'true'
+          },
           body: JSON.stringify({ query: msg }),
           signal: controller.signal
         });
