@@ -179,7 +179,7 @@ EMBEDDING_MODEL=models/gemini-embedding-001
 
 ## 🐳 Docker Compose Quickstart (Recommended)
 
-The entire Telemachus system is fully containerized. Running Docker Compose automatically downloads/unzips the dataset archive (`dataset.zip`), sets up DuckDB, indexes the text documents into ChromaDB, and launches the web application:
+The entire Telemachus system is fully containerized. Running Docker Compose automatically downloads/unzips the dataset archive (`dataset.zip`), sets up DuckDB, indexes the text documents into ChromaDB, launches the web application, and **automatically spins up a Cloudflare Tunnel for public access**:
 
 ```bash
 # 1. Provide your Gemini API key in .env
@@ -189,10 +189,20 @@ cp .env.example .env
 # 2. Build and launch the container
 docker compose up -d
 
-# 3. Access Lumen UI & API
-# Web UI:    http://localhost:8000
-# API Docs:  http://localhost:8000/docs
-# Health:    http://localhost:8000/api/health
+# 3. View the live public Cloudflare Tunnel URL
+docker compose logs -f
+```
+
+Every time the container starts, it outputs a banner with your temporary public URL:
+```text
+==================================================================
+ 🚀 TELEMACHUS PUBLIC CLOUDFLARE TUNNEL URL:
+    https://<random-id>.trycloudflare.com
+
+ 📱 Open the URL above in your browser to access the live app!
+ 🏠 Local URL:     http://localhost:8000
+ 📚 API Docs:      http://localhost:8000/docs
+==================================================================
 ```
 
 ---

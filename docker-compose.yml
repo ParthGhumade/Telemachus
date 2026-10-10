@@ -31,6 +31,7 @@ services:
       - ./frontend:/app/frontend:ro
       - ./backend/main.py:/app/backend/main.py:ro
       - ./backend/orchestrator.py:/app/backend/orchestrator.py:ro
+      - ./docker-entrypoint.sh:/app/docker-entrypoint.sh
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/api/health || exit 1"]
       interval: 30s
